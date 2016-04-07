@@ -24,7 +24,7 @@ int extract(){
 	imshow("dst4",dstImg);
 	return 1;
 }
-int main(){
+/*int main(){
 	extract();
 	waitKey();
-}
+}*/
