@@ -100,15 +100,15 @@
       </PrecompiledHeader>
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
-      <PreprocessorDefinitions>ARMA_USE_LAPACK;ARMA_USE_BLAS;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>..\opencv3\include;$(ProjectDir)armadillo\include</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>ARMA_USE_BLAS;ARMA_USE_LAPACK;WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>..\opencv3\include;$(ProjectDir)armadillo\include;$(ProjectDir)vlfeat</AdditionalIncludeDirectories>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>opencv_ts300d.lib;opencv_world300d.lib;blas_win64_MT.lib;lapack_win64_MT.lib</AdditionalDependencies>
-      <AdditionalLibraryDirectories>..\opencv3\x64\vc11\lib;$(ProjectDir)armadillo\lib_win64</AdditionalLibraryDirectories>
+      <AdditionalDependencies>vl.lib;opencv_ts300d.lib;opencv_world300d.lib;blas_win64_MT.lib;lapack_win64_MT.lib</AdditionalDependencies>
+      <AdditionalLibraryDirectories>..\opencv3\x64\vc11\lib;$(ProjectDir)armadillo\lib_win64;$(ProjectDir)vlfeat\bin\win64</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">

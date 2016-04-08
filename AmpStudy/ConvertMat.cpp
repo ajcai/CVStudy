@@ -4,6 +4,12 @@
 #include <array>
 #include <amp.h>
 #include <amp_math.h>
+extern "C"{
+#include <vl/kdtree.h>
+#include <vl/generic.h>
+#include <vl/kdtree.h>
+}
+
 
 
 //using namespace cv;
@@ -116,7 +122,7 @@ static void run_jor(){
 	//--------------------------------------------------------
 	//PCA
 	mat pca;
-	pca.load(".\\model_vars\\pca.txt");
+	pca.load(".\\model_vars\\pca.data");
 	features=pca.t()*features;
 	cout<<"pca features size"<<size(features)<<endl;
 	//---------------------------------------------------------
@@ -133,12 +139,53 @@ static void run_jor(){
 }
 
 int main(){
-	run_jor();
-	
-	mat pca;
-	pca.load(".\\model_vars\\pca.txt");
-	cout<<"size of pca"<<size(pca)<<endl;
+	//run_jor();
 
+	//VL_PRINT("Hello World!\n");
+	///*prepare training data*/
+	////read file
+	//clock_t start,end;double dur_sec;//计时
+	//start=clock();
+	//arma::Mat<float> lowpatches;
+	//lowpatches.load(".\\model_vars\\lowpatches.data");
+	//end=clock();
+	//dur_sec=double(end-start)/CLOCKS_PER_SEC;
+	//printf("read data file:%fs\n",dur_sec);
 
+	//int feat_dims=lowpatches.n_rows;//特征维数
+	//int feat_nums=lowpatches.n_cols;//特征数目
+
+	///*prepare query data*/
+	//int qry_num=10;//查询数量
+	//arma::Mat<float> querymat(feat_dims,qry_num,fill::zeros);
+	///*build the kdtree*/
+	//start=clock();
+	//VlKDForest* kdforest = vl_kdforest_new(VL_TYPE_FLOAT,feat_dims,1,VlDistanceL1);
+	//vl_kdforest_build(kdforest,feat_nums,lowpatches.memptr());
+	//end=clock();
+	//dur_sec=double(end-start)/CLOCKS_PER_SEC;
+	//printf("build tree runtime:%fs\n",dur_sec);
+
+	///* Searcher object */
+	//vl_kdforest_set_max_num_comparisons(kdforest,1500);
+	//VlKDForestSearcher* searcher = vl_kdforest_new_searcher(kdforest);
+	//const int NN_K=16;
+	//umat knn_indexes(NN_K,qry_num);
+	//VlKDForestNeighbor neighbours[NN_K];
+	//for(int q=0;q<qry_num;q++){
+	//	vl_kdforestsearcher_query(searcher,neighbours,NN_K,querymat.colptr(q));
+	//	for(int k=0;k<NN_K;k++){
+	//		knn_indexes(k,q)=neighbours[k].index;
+	//	}
+	//}
+	//knn_indexes.print("knn_indexs");
 	
+
+	arma::Mat<float> lowpatches_labels_f;
+	lowpatches_labels_f.load(".\\model_vars\\lowpatches_labels.data");
+
+	umat lowpatches_labels=conv_to<umat>::from(lowpatches_labels_f);
+	lowpatches_labels(span(0,99),0).print("lowpatches_labels");
+	printf("finish!\n");
+
 }
