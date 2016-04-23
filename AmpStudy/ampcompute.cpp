@@ -58,6 +58,48 @@ vector<int> create_matrix(int size){
 	});
 	return matrix;
 }
-
+//int main(){
+//	const int size=10000000;
+//	vector<int> matrix(size);
+//	clock_t start,end;double dur_sec;//计时
+//	//---------------------------------------------
+//	start=clock();
+//	for(int idx=0;idx<size;idx++){
+//		matrix[idx]=idx;
+//	}
+//	end=clock();
+//	dur_sec=double(end-start)/CLOCKS_PER_SEC;
+//	printf("CPU串行用时:%fs\n",dur_sec);
+//	//----------------------------------------------
+//	start=clock();
+//	parallel_for(0,size,[&matrix](int idx){
+//		matrix[idx]=idx;
+//	});
+//	end=clock();
+//	dur_sec=double(end-start)/CLOCKS_PER_SEC;
+//	printf("CPU并行用时:%fs\n",dur_sec);
+//	//----------------------------------------------
+//	start=clock();
+//	array_view<int,1> am(size,matrix);
+//	am.discard_data();
+//	parallel_for_each(am.extent,[=](index<1> idx) restrict(amp){
+//		am[idx] = idx.rank;
+//	});
+//	end=clock();
+//	dur_sec=double(end-start)/CLOCKS_PER_SEC;
+//	printf("GPU并行用时:%fs\n",dur_sec);
+//
+//
+//	for (int i=0; i<size; i++){  
+//		index<1> idx(i);
+//		std::cout << am[idx]<<" ";
+//	 }  
+//	//for(int i=0;i<size;i++){
+//	//	cout<<matrix[i]<<" ";
+//	//}
+//
+//
+//	return 0;
+//}
 
 

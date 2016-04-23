@@ -10,7 +10,7 @@ extern "C"{
 #include <vl/kdtree.h>
 }
 
-
+clock_t start,end;double dur_sec;//计时
 
 //using namespace cv;
 using namespace std;
@@ -53,8 +53,13 @@ static void Write_arma_mat(arma::mat mat,char* filename){
 	cv_mat_show=cv_mat_show*255;
 	cv::imwrite(filename,cv_mat_show);
 };
-
-static arma::mat Collect_features(const arma::mat& arma_mat_in,field<mat>& filters,SizeMat& window,SizeMat& overlap){
+static void Sample_grid(const SizeMat& img_size,const SizeMat& window,const SizeMat& overlap,uvec& grid_row,uvec& grid_col){//grid_row,grid_col为返回参数，表示网格左上角点
+	//sample grid
+	SizeMat skip=window-overlap;
+	grid_row=regspace<uvec>(0,skip(0),img_size(0)-window(0));
+	grid_col=regspace<uvec>(0,skip(1),img_size(1)-window(1));
+}
+static arma::mat Collect_features(const arma::mat& arma_mat_in,const field<mat>& filters,const SizeMat& window,const SizeMat& overlap){
 	//filter the image
 	field<mat> feature_imgs(filters.n_elem);
 	for(int i=0;i<filters.n_elem;i++){
@@ -67,24 +72,50 @@ static arma::mat Collect_features(const arma::mat& arma_mat_in,field<mat>& filte
 	//sample grid
 	int patch_size=window(0)*window(1);
 	SizeMat skip=window-overlap;
-	int sample_row_num=(arma_mat_in.n_rows-window(0))/skip(0)+1;//sample grid of row numbers
-	int sample_col_num=(arma_mat_in.n_cols-window(1))/skip(1)+1;//sample grid of col numbers
-	int sample_patch_num=sample_row_num*sample_col_num;// number of patches
-	uvec grid_row(sample_row_num);//row of grid top-left point of grid
-	for(int i=0;i<grid_row.n_elem;i++){grid_row(i)=i*skip(0);}
-	uvec grid_col(sample_col_num);//col of grid top-left point of grid
-	for(int i=0;i<grid_col.n_elem;i++){grid_col(i)=i*skip(1);}
+	uvec grid_row; //=regspace<uvec>(0,skip(0),size(arma_mat_in,0)-window(0));
+	uvec grid_col; //=regspace<uvec>(0,skip(1),size(arma_mat_in,1)-window(1));
+	Sample_grid(size(arma_mat_in),window,overlap,grid_row,grid_col);
+	int sample_row_num=grid_row.n_elem;
+	int sample_col_num=grid_col.n_elem;
+	int sample_patch_num=grid_row.n_elem*grid_col.n_elem;
 
 	arma::mat features(patch_size*filters.n_elem,sample_patch_num);		//所有特征
-	for(int i=0;i<sample_patch_num;i++){
+	clock_t start,end;double dur_sec;//计时
+	start=clock();
+	parallel_for(0,sample_patch_num,[&](int i){
 		vec patch_feature(window(0)*window(1)*filters.n_elem);
 		for(int f=0;f<filters.n_elem;f++){//取对应patch的特征，将多个滤波结果合为一个特征
 			arma::mat patch=feature_imgs(f)(i%sample_row_num,i/sample_row_num,window);
 			patch_feature(span(patch_size*f,patch_size*(f+1)-1))=vectorise(patch);
 		}
 		features.col(i)=patch_feature;
-	}
+	});
+	end=clock();
+	dur_sec=double(end-start)/CLOCKS_PER_SEC;
+	printf("grid patches:%fs\n",dur_sec);
 	return features;
+}
+static arma::mat Overlap_add(const arma::SizeMat& img_size,const mat& recovered_features,const SizeMat& window,const SizeMat& overlap){//特征矩阵转化为图像
+	uvec grid_row; //=regspace<uvec>(0,skip(0),size(arma_mat_in,0)-window(0));
+	uvec grid_col; //=regspace<uvec>(0,skip(1),size(arma_mat_in,1)-window(1));
+	Sample_grid(img_size,window,overlap,grid_row,grid_col);
+	int sample_row_num=grid_row.n_elem;
+	int sample_col_num=grid_col.n_elem;
+	int sample_patch_num=grid_row.n_elem*grid_col.n_elem;
+
+	arma::mat overlap_img(img_size,fill::zeros);		//合成图像
+	umat weight(img_size,fill::ones);
+	clock_t start,end;double dur_sec;//计时
+	start=clock();
+	parallel_for(0,sample_patch_num,[&](int i){
+		overlap_img(i%sample_row_num,i/sample_row_num,window)=reshape(recovered_features,window);
+		weight(i%sample_row_num,i/sample_row_num,window)+=1;
+	});
+	overlap_img=overlap_img/weight;
+	end=clock();
+	dur_sec=double(end-start)/CLOCKS_PER_SEC;
+	printf("overlap patches:%fs\n",dur_sec);
+	return overlap_img;
 }
 static void run_jor(){
 	//------------------------------------------------
@@ -121,13 +152,100 @@ static void run_jor(){
 	cout<<"all features size"<<size(features)<<endl;
 	//--------------------------------------------------------
 	//PCA
-	mat pca;
+	fmat pca;
 	pca.load(".\\model_vars\\pca.data");
+	clock_t start,end;double dur_sec;//计时
+	start=clock();
 	features=pca.t()*features;
+	mat features_knn=normalise(features,1,0);
+	end=clock();
+	dur_sec=double(end-start)/CLOCKS_PER_SEC;
+	printf("matrix multiply:%fs\n",dur_sec);
 	cout<<"pca features size"<<size(features)<<endl;
 	//---------------------------------------------------------
 
-	/*cv::Mat mergedImage,recoveryImg;
+
+	//find knn
+	//VL_PRINT("Hello World!\n");
+	//prepare training data
+	//read file
+
+	start=clock();
+	arma::Mat<float> lowpatches;
+	lowpatches.load(".\\model_vars\\lowpatches.data");
+	end=clock();
+	dur_sec=double(end-start)/CLOCKS_PER_SEC;
+	printf("load lowpatches data:%fs\n",dur_sec);
+
+	int feat_dims=lowpatches.n_rows;//特征维数
+	int feat_nums=lowpatches.n_cols;//特征数目
+
+	////prepare query data
+	//int qry_num=10;//查询数量
+	//arma::Mat<float> querymat(feat_dims,qry_num,fill::zeros);
+	//build the kdtree
+	start=clock();
+	VlKDForest* kdforest = vl_kdforest_new(VL_TYPE_FLOAT,feat_dims,1,VlDistanceL1);
+	vl_kdforest_build(kdforest,feat_nums,lowpatches.memptr());
+	end=clock();
+	dur_sec=double(end-start)/CLOCKS_PER_SEC;
+	printf("build tree runtime:%fs\n",dur_sec);
+
+	// Searcher object 
+	int qry_num=size(features_knn,1);
+	vl_kdforest_set_max_num_comparisons(kdforest,1500);
+	VlKDForestSearcher* searcher = vl_kdforest_new_searcher(kdforest);
+	const int NN_K=1;
+	umat knn_indexes(NN_K,qry_num);//k个最近邻的patch
+	VlKDForestNeighbor neighbours[NN_K];
+	for(int q=0;q<qry_num;q++){
+		vl_kdforestsearcher_query(searcher,neighbours,NN_K,features_knn.colptr(q));
+		for(int k=0;k<NN_K;k++){
+			knn_indexes(k,q)=neighbours[k].index;
+		}
+	}
+
+	cout<<"knn_indexs size"<<size(knn_indexes)<<endl;
+	//-------------------------------------------------------
+	//load labels
+	arma::Mat<float> lowpatches_labels_f;
+	lowpatches_labels_f.load(".\\model_vars\\lowpatches_labels.data");
+	umat lowpatches_labels=conv_to<umat>::from(lowpatches_labels_f)-1;//need to be improved,the saved file should be uint type
+	//find best reg
+	umat knn_reg(size(knn_indexes));
+	parallel_for(0,(int)knn_indexes.n_cols,[&](int i){
+		knn_reg.col(i)=lowpatches_labels(knn_indexes.col(i));
+	});
+	cout<<"knn_reg"<<size(knn_reg)<<endl;
+	//---------------------------------------------------------
+	//load PPs
+	field<mat> PPs;
+	PPs.load(".\\model_vars\\PPs.data");
+	//-------------------------------------------------------
+	//恢复细节
+	start=clock();
+	mat recovered_features(size(PPs(0),0),size(features,1));
+	cout<<"recovered_features"<<size(recovered_features)<<endl;
+	parallel_for(0,(int)size(features,1),[&](int i){
+		recovered_features.col(i)=PPs(knn_reg(0,i))*features.col(i);
+	});
+	end=clock();
+	dur_sec=double(end-start)/CLOCKS_PER_SEC;
+	printf("recover detail time:%fs\n",dur_sec);
+	cout<<"recovered_features: mean"<<mean(mean(recovered_features))<<endl;
+	recovered_features.col(1).print("recovered_features");
+
+	mat detail_img=Overlap_add(size(img),recovered_features,window,overlap);
+	cout<<"detail img size:"<<size(detail_img)<<endl;
+
+	//cv::Mat_<double> cv_detail;
+	//Arma_mat_to_cv_mat(detail_img,cv_detail);
+	//cv::imshow("detail",cv_detail*255);
+	//cvWaitKey();
+
+
+	/*合并颜色空间，得到彩色图像
+	cv::Mat mergedImage,recoveryImg;
 	vector<cv::Mat> merged_channels;
 	merged_channels.push_back(grayImg);
 	merged_channels.push_back(cbImg);
@@ -139,53 +257,6 @@ static void run_jor(){
 }
 
 int main(){
-	//run_jor();
-
-	//VL_PRINT("Hello World!\n");
-	///*prepare training data*/
-	////read file
-	//clock_t start,end;double dur_sec;//计时
-	//start=clock();
-	//arma::Mat<float> lowpatches;
-	//lowpatches.load(".\\model_vars\\lowpatches.data");
-	//end=clock();
-	//dur_sec=double(end-start)/CLOCKS_PER_SEC;
-	//printf("read data file:%fs\n",dur_sec);
-
-	//int feat_dims=lowpatches.n_rows;//特征维数
-	//int feat_nums=lowpatches.n_cols;//特征数目
-
-	///*prepare query data*/
-	//int qry_num=10;//查询数量
-	//arma::Mat<float> querymat(feat_dims,qry_num,fill::zeros);
-	///*build the kdtree*/
-	//start=clock();
-	//VlKDForest* kdforest = vl_kdforest_new(VL_TYPE_FLOAT,feat_dims,1,VlDistanceL1);
-	//vl_kdforest_build(kdforest,feat_nums,lowpatches.memptr());
-	//end=clock();
-	//dur_sec=double(end-start)/CLOCKS_PER_SEC;
-	//printf("build tree runtime:%fs\n",dur_sec);
-
-	///* Searcher object */
-	//vl_kdforest_set_max_num_comparisons(kdforest,1500);
-	//VlKDForestSearcher* searcher = vl_kdforest_new_searcher(kdforest);
-	//const int NN_K=16;
-	//umat knn_indexes(NN_K,qry_num);
-	//VlKDForestNeighbor neighbours[NN_K];
-	//for(int q=0;q<qry_num;q++){
-	//	vl_kdforestsearcher_query(searcher,neighbours,NN_K,querymat.colptr(q));
-	//	for(int k=0;k<NN_K;k++){
-	//		knn_indexes(k,q)=neighbours[k].index;
-	//	}
-	//}
-	//knn_indexes.print("knn_indexs");
+	run_jor();
 	
-
-	arma::Mat<float> lowpatches_labels_f;
-	lowpatches_labels_f.load(".\\model_vars\\lowpatches_labels.data");
-
-	umat lowpatches_labels=conv_to<umat>::from(lowpatches_labels_f);
-	lowpatches_labels(span(0,99),0).print("lowpatches_labels");
-	printf("finish!\n");
-
 }
