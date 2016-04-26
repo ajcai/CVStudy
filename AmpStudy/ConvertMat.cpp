@@ -61,13 +61,18 @@ static void Sample_grid(const SizeMat& img_size,const SizeMat& window,const Size
 }
 static arma::mat Collect_features(const arma::mat& arma_mat_in,const field<mat>& filters,const SizeMat& window,const SizeMat& overlap){
 	//filter the image
-	field<mat> feature_imgs(filters.n_elem);
-	for(int i=0;i<filters.n_elem;i++){
-		mat rst=conv2(arma_mat_in,filters(i),"same");
-		feature_imgs(i)=rst;
-		char filename[100];
-		sprintf(filename,"data/result/filter_result_%d.bmp",i);
-		Write_arma_mat(rst,filename); //保存滤波中间结果
+	int filter_num=filters.n_elem==0?1:filters.n_elem;
+	field<mat> feature_imgs(filter_num);
+	if(filters.is_empty()){//滤波器为空，则取原图
+		feature_imgs(0)=arma_mat_in;
+	}else{
+		for(int i=0;i<filter_num;i++){
+			mat rst=conv2(arma_mat_in,filters(i),"same");
+			feature_imgs(i)=rst;
+			char filename[100];
+			sprintf(filename,"data/result/filter_result_%d.bmp",i);
+			Write_arma_mat(rst,filename); //保存滤波中间结果
+		}
 	}
 	//sample grid
 	int patch_size=window(0)*window(1);
@@ -79,13 +84,13 @@ static arma::mat Collect_features(const arma::mat& arma_mat_in,const field<mat>&
 	int sample_col_num=grid_col.n_elem;
 	int sample_patch_num=grid_row.n_elem*grid_col.n_elem;
 
-	arma::mat features(patch_size*filters.n_elem,sample_patch_num);		//所有特征
+	arma::mat features(patch_size*filter_num,sample_patch_num);		//所有特征
 	clock_t start,end;double dur_sec;//计时
 	start=clock();
 	parallel_for(0,sample_patch_num,[&](int i){
-		vec patch_feature(window(0)*window(1)*filters.n_elem);
-		for(int f=0;f<filters.n_elem;f++){//取对应patch的特征，将多个滤波结果合为一个特征
-			arma::mat patch=feature_imgs(f)(i%sample_row_num,i/sample_row_num,window);
+		vec patch_feature(window(0)*window(1)*filter_num);
+		for(int f=0;f<filter_num;f++){//取对应patch的特征，将多个滤波结果合为一个特征
+			arma::mat patch=feature_imgs(f)(grid_row(i%sample_row_num),grid_col(i/sample_row_num),window);
 			patch_feature(span(patch_size*f,patch_size*(f+1)-1))=vectorise(patch);
 		}
 		features.col(i)=patch_feature;
@@ -104,12 +109,12 @@ static arma::mat Overlap_add(const arma::SizeMat& img_size,const mat& recovered_
 	int sample_patch_num=grid_row.n_elem*grid_col.n_elem;
 
 	arma::mat overlap_img(img_size,fill::zeros);		//合成图像
-	umat weight(img_size,fill::ones);
+	mat weight(img_size,fill::zeros);
 	clock_t start,end;double dur_sec;//计时
 	start=clock();
 	parallel_for(0,sample_patch_num,[&](int i){
-		overlap_img(i%sample_row_num,i/sample_row_num,window)=reshape(recovered_features,window);
-		weight(i%sample_row_num,i/sample_row_num,window)+=1;
+		overlap_img(grid_row(i%sample_row_num),grid_col(i/sample_row_num),window)+=reshape(recovered_features.col(i),window);
+		weight(grid_row(i%sample_row_num),grid_col(i/sample_row_num),window)+=1;
 	});
 	overlap_img=overlap_img/weight;
 	end=clock();
@@ -117,19 +122,74 @@ static arma::mat Overlap_add(const arma::SizeMat& img_size,const mat& recovered_
 	printf("overlap patches:%fs\n",dur_sec);
 	return overlap_img;
 }
+template<typename T>
+static arma::Mat<T> modcrop(arma::Mat<T> arma_mat_in,int mod){
+	return arma_mat_in(span(0,(arma_mat_in.n_rows/mod)*mod),span(0,(arma_mat_in.n_cols/mod)*mod));
+}
+template<typename T>
+static arma::Mat<T> Normalize(arma::Mat<T> arma_mat_in){
+	arma::Mat<T> I2=sqrt(sum(arma_mat_in%arma_mat_in,0));
+	arma::Mat<T> I2n=repmat(I2,size(arma_mat_in,0),1);
+	return arma_mat_in/I2n;
+}
+//static arma::imat Mode(const arma::imat arma_imat_in,int range_max=32){
+//	imat cnt(range_max,size(arma_imat_in,1),fill::zeros);//统计个数的矩阵
+//	imat rst(1,size(arma_imat_in,1),fill::zeros);
+//	//统计个数
+//	parallel_for(0,(int)size(arma_imat_in,1),[&](int c){
+//		arma_imat_in.col(c).for_each([&cnt,c](const arma::s32 & val){
+//			cnt(val,c)++;
+//		});
+//	});
+//	//找出最大数的下标
+//	parallel_for(0,(int)size(cnt,1),[&](int c){
+//		int max_c=0;//出现的最多元素的次数
+//		int max_i=0;//出现的最多元素的下标
+//		for(int j=0;j<size(cnt,0);j++){
+//			if(cnt(j,c)>max_c){max_c=cnt(j,c);max_i=j;}
+//		}
+//		rst(0,c)=max_i;
+//	});
+//	return rst;
+//}
+static arma::umat Mode(const arma::umat arma_umat_in,int range_max=32){
+	umat cnt(range_max,size(arma_umat_in,1),fill::zeros);//统计个数的矩阵
+	umat rst(1,size(arma_umat_in,1),fill::zeros);
+	//统计个数
+	parallel_for(0,(int)size(arma_umat_in,1),[&](int c){
+		arma_umat_in.col(c).for_each([&cnt,c](const arma::u32 & val){
+			cnt(val,c)++;
+		});
+	});
+	//找出最大数的下标
+	parallel_for(0,(int)size(cnt,1),[&](int c){
+		int max_c=0;//出现的最多元素的次数
+		int max_i=0;//出现的最多元素的下标
+		for(int j=0;j<size(cnt,0);j++){
+			if(cnt(j,c)>max_c){max_c=cnt(j,c);max_i=j;}
+		}
+		rst(0,c)=max_i;
+	});
+	return rst;
+}
+
 static void run_jor(){
 	//------------------------------------------------
 	//read img and get gray image
 	vector<cv::Mat> channels;
-	cv::Mat cv_img=cv::imread("data/license.jpg"),ycbcrImg,grayImg,cbImg,crImg,interpolatedImg;
-	cv::resize(cv_img,interpolatedImg,cv::Size(),3,3,cv::INTER_CUBIC);		//双立方插值放大
+	cv::Mat cv_img=cv::imread("data/high-street_3.jpg"),ycbcrImg,grayImg,cbImg,crImg,interpolatedImg;
+	//cv::resize(cv_img,interpolatedImg,cv::Size(),3,3,cv::INTER_CUBIC);		//立方插值放大
+	interpolatedImg=cv_img;
 	cvtColor(interpolatedImg,ycbcrImg,cv::COLOR_RGB2YCrCb);
 	split(ycbcrImg,channels);
 	grayImg=channels.at(0);
 	cbImg=channels.at(1);
 	crImg=channels.at(2);
+	cv::imwrite("data/result/interpolated.bmp",grayImg);
 	//---------------------------------------------------
 	//convert cv::Mat to arma::mat
+	int upscale_factor=3;
+	//cv::Mat grayImg=cv::imread("data/license_bicubic.bmp");
 	mat img(grayImg.rows,grayImg.cols);
 	Cv_mat_to_arma_mat(grayImg,img);
 	//----------------------------------------------------
@@ -144,8 +204,8 @@ static void run_jor(){
 	filters(2)=L;
 	filters(3)=L.t();
 	SizeMat window=size(3,3);
-	SizeMat overlap=size(2,2);
-	int upscale_factor=3;
+	SizeMat overlap=size(1,1);
+	
 	//-----------------------------------------------------
 	//get features
 	mat features=Collect_features(img,filters,window*upscale_factor,overlap*upscale_factor);
@@ -156,8 +216,9 @@ static void run_jor(){
 	pca.load(".\\model_vars\\pca.data");
 	clock_t start,end;double dur_sec;//计时
 	start=clock();
-	features=pca.t()*features;
-	mat features_knn=normalise(features,1,0);
+	features=pca.t()*features;  // ？？？  怎么验证这一步骤的结果正确性？
+	Write_arma_mat(features,".\\data\\tmp\\pca_features.bmp");//查看降维之后的结果  ？？
+	fmat features_knn=conv_to<fmat>::from(Normalize(features));
 	end=clock();
 	dur_sec=double(end-start)/CLOCKS_PER_SEC;
 	printf("matrix multiply:%fs\n",dur_sec);
@@ -195,7 +256,7 @@ static void run_jor(){
 	int qry_num=size(features_knn,1);
 	vl_kdforest_set_max_num_comparisons(kdforest,1500);
 	VlKDForestSearcher* searcher = vl_kdforest_new_searcher(kdforest);
-	const int NN_K=1;
+	const int NN_K=16;
 	umat knn_indexes(NN_K,qry_num);//k个最近邻的patch
 	VlKDForestNeighbor neighbours[NN_K];
 	for(int q=0;q<qry_num;q++){
@@ -217,6 +278,7 @@ static void run_jor(){
 		knn_reg.col(i)=lowpatches_labels(knn_indexes.col(i));
 	});
 	cout<<"knn_reg"<<size(knn_reg)<<endl;
+	umat final_reg=Mode(knn_reg);//nn个回归投票
 	//---------------------------------------------------------
 	//load PPs
 	field<mat> PPs;
@@ -227,36 +289,41 @@ static void run_jor(){
 	mat recovered_features(size(PPs(0),0),size(features,1));
 	cout<<"recovered_features"<<size(recovered_features)<<endl;
 	parallel_for(0,(int)size(features,1),[&](int i){
-		recovered_features.col(i)=PPs(knn_reg(0,i))*features.col(i);
-	});
+		recovered_features.col(i)=PPs(final_reg(0,i))*features.col(i);
+	}); //？？？
 	end=clock();
 	dur_sec=double(end-start)/CLOCKS_PER_SEC;
 	printf("recover detail time:%fs\n",dur_sec);
-	cout<<"recovered_features: mean"<<mean(mean(recovered_features))<<endl;
-	recovered_features.col(1).print("recovered_features");
-
-	mat detail_img=Overlap_add(size(img),recovered_features,window,overlap);
+	//Write_arma_mat(recovered_features,".\\data\\tmp\\recovered_features.bmp");//查看回归之后的结果
+	mat detail_img=Overlap_add(size(img),recovered_features,window*upscale_factor,overlap*upscale_factor);
 	cout<<"detail img size:"<<size(detail_img)<<endl;
-
+	Write_arma_mat(detail_img,".\\data\\tmp\\detail_img.bmp");
+	recovered_features=recovered_features+Collect_features(img,*(new field<mat>),window*upscale_factor,overlap*upscale_factor);
+	mat jor_img=Overlap_add(size(img),recovered_features,window*upscale_factor,overlap*upscale_factor);
+	Write_arma_mat(jor_img,".\\data\\tmp\\jor_img.bmp");
+	//查看叠加之后的结果
 	//cv::Mat_<double> cv_detail;
 	//Arma_mat_to_cv_mat(detail_img,cv_detail);
 	//cv::imshow("detail",cv_detail*255);
 	//cvWaitKey();
 
 
-	/*合并颜色空间，得到彩色图像
-	cv::Mat mergedImage,recoveryImg;
-	vector<cv::Mat> merged_channels;
-	merged_channels.push_back(grayImg);
-	merged_channels.push_back(cbImg);
-	merged_channels.push_back(crImg);
-	cv::merge(merged_channels,mergedImage);
-	cvtColor(mergedImage,recoveryImg,cv::COLOR_YCrCb2RGB);
-	cv::imshow("merged",recoveryImg);
-	cvWaitKey();*/
+	////合并颜色空间，得到彩色图像
+	//cv::Mat mergedImage,recoveryImg;
+	//vector<cv::Mat> merged_channels;
+	//cv::Mat_<double> cv_mat_ychan(img.n_rows,img.n_cols);
+	//Arma_mat_to_cv_mat(jor_img,cv_mat_ychan);
+	//grayImg=cv_mat_ychan*255;
+	//merged_channels.push_back(grayImg);
+	//merged_channels.push_back(cbImg);
+	//merged_channels.push_back(crImg);
+	//cv::merge(merged_channels,mergedImage);
+	//cvtColor(mergedImage,recoveryImg,cv::COLOR_YCrCb2RGB);
+	//cv::imshow("merged",recoveryImg);
+	//cvWaitKey();
 }
 
 int main(){
 	run_jor();
-	
+
 }
